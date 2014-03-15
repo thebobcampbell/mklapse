@@ -1,0 +1,40 @@
+#!/bin/bash 
+
+# by Robert Campbell <rsc@indra.com>
+
+set -e
+
+# set defaults
+output="timelapse"
+bitrate=5000
+fps=30
+
+NARG=$#
+if [ $NARG -eq 0 ]; then
+	echo 1>&2 "usage: mklapse [-o output_filename] [-f frames_per_sec] [-b bitrate] <image list>"
+	exit 1
+fi
+while [ $NARG -gt 0 ] 
+do
+	case "$1" in
+		-o) output="$2"; shift;;
+		-f) fps=$2; shift;;
+		-b) bitrate=$2; shift;;
+		*) filelist="$1"; break;;
+	esac
+	shift
+done
+
+for jpg in `find . -name "*.JPG"` 
+do 
+	snap=`exif -i $jpg | grep 0x9003 | awk -F'|' '{print $2}'`
+	echo "${snap}|${jpg}" >> ./order
+#	echo ${jpg} >> stampedfiles
+#        echo ${snap} >> stampedfiles
+done
+sort order | awk -F'|' '{print $2}' > sortedfiles
+#parallel --gnu -N2 -j+1 convert {1} -geometry 1280x720 -gravity southeast -fill orange  -annotate 0x0+10+5 '{2}' {1.}-small.jpg :::: stampedfiles
+parallel --gnu -j+1 convert {} -geometry 1280x720 {.}-small.jpg :::: sortedfiles
+sed 's/.JPG/-small.jpg/g' < sortedfiles > resizedfiles
+mencoder "mf://@resizedfiles" -mf fps=30 -o ${output}.avi -ovc lavc -lavcopts vcodec=msmpeg4v2:vbitrate=5000
+rm order
