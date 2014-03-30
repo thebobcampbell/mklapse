@@ -1,6 +1,12 @@
 #!/bin/bash 
 
 # by Robert Campbell <rsc@indra.com>
+# you need the following software for this script:
+# Imagemagick   http://www.imagemagick.org/‎
+# GNU parallel   http://www.gnu.org/software/parallel/
+# mencoder (MPlayer)  http://en.wikipedia.org/wiki/MEncoder
+# libexif   http://libexif.sourceforge.net/
+
 
 set -e
 
@@ -8,27 +14,47 @@ set -e
 output="timelapse"
 bitrate=5000
 fps=30
+keep=0
 
 NARG=$#
-if [ $NARG -eq 0 ]; then
-	echo 1>&2 "usage: mklapse [-o output_filename] [-f frames_per_sec] [-b bitrate] <image list>"
-	exit 1
-fi
+#if [ $NARG -eq 0 ]; then
+#	echo 1>&2 "usage: mklapse [-o output_filename] [-f frames_per_sec] [-b bitrate] [-k] <image list>"
+#	exit 1
+#fi
+
 while [ $NARG -gt 0 ] 
 do
 	case "$1" in
+		-h)  echo 1>&2 "usage: mklapse [-o output_filename] [-f frames_per_sec] [-b bitrate] [-k] <image list>";
+			 exit 1;;
+#  select a filename for output from mencoder.  ".avi" will be added to the end.
 		-o) output="$2"; shift;;
+#  frames per second.  30 is nice and smooth
 		-f) fps=$2; shift;;
+#  bitrate determines encoding compression
 		-b) bitrate=$2; shift;;
+#  keep intermediate files, otherwise the resized jpegs and the file lists will be deleted (default)
+		-k) keep=1; shift;;
+#  filelist - still a work in progress.  so far still just using 'find'; might be useful to have a filename
+#  pattern, or just a file with a list of input files
 		*) filelist="$1"; break;;
 	esac
 	shift
 done
 
+# right now just assuming ".JPG" as the extension of the files - the default on my Canons.  
+#  Would be useful to switch to an option to explicitly state the extension of the filenames.
+#  ...or just make use of the filelist option above...
 for jpg in `find . -name "*.JPG"` 
 do 
+#  0x9003 is the exif code for timestamp that the image was taken, at least on my Canons - need to verify for 
+#  other makes/models.  I use this method rather than by filename/numbering since I don't always remember to 
+# reset the file numbering in the camera before I get started, so if the numbering rolls over from 9999 to 
+#  0001, I still get the order the images were taken.
 	snap=`exif -i $jpg | grep 0x9003 | awk -F'|' '{print $2}'`
+# add each file, preceded by it's timestamp, to the order file...
 	echo "${snap}|${jpg}" >> ./order
+# below line need to be optioned for adding timestamp to the image itself - needs more work.
 #	echo ${jpg} >> stampedfiles
 #        echo ${snap} >> stampedfiles
 done
@@ -36,5 +62,5 @@ sort order | awk -F'|' '{print $2}' > sortedfiles
 #parallel --gnu -N2 -j+1 convert {1} -geometry 1280x720 -gravity southeast -fill orange  -annotate 0x0+10+5 '{2}' {1.}-small.jpg :::: stampedfiles
 parallel --gnu -j+1 convert {} -geometry 1280x720 {.}-small.jpg :::: sortedfiles
 sed 's/.JPG/-small.jpg/g' < sortedfiles > resizedfiles
-mencoder "mf://@resizedfiles" -mf fps=30 -o ${output}.avi -ovc lavc -lavcopts vcodec=msmpeg4v2:vbitrate=5000
+mencoder "mf://@resizedfiles" -mf fps=${fps} -o ${output}.avi -ovc lavc -lavcopts vcodec=msmpeg4v2:vbitrate=${bitrate}
 rm order
