@@ -7,60 +7,224 @@
 # mencoder (MPlayer)  http://en.wikipedia.org/wiki/MEncoder
 # libexif   http://libexif.sourceforge.net/
 
+#  The idea is this: You take an intervalometer series of images with a camera.  The timelapse section
+# of the script will sort the files by shutter actuation time in the exif data (regardless of filename)
+# and create an AVI movie.  Once the order is known, you can create a composite of all or a subset of 
+# the images.  You can also have it create an AVI of the process of creating the AVI.
+
 
 set -e
 
 # set defaults
 output="timelapse"
+extension="JPG"
+today=$(date +%Y%m%d)
 bitrate=5000
 fps=30
 keep=0
+# it would be nice to figure out how  many cores are available, but each unix has a different reporting method
+jobs=1
+scale=768
+codec="msmpeg4v2"
+temp=${output}_temp
+input=composefiles
+method=lighten
+lapse=0
+composite=0
+anim=0
+
+#  check for existence of tools we need
+command -v exiftool >/dev/null 2>&1 || { echo >&2 "I require exiftool but it's not installed.  Aborting."; exit 1; }
+command -v mencoder >/dev/null 2>&1 || { echo >&2 "I require mencoder but it's not installed.  Aborting."; exit 1; }
+command -v convert >/dev/null 2>&1 || { echo >&2 "I require Image Magick but it's not installed.  Aborting."; exit 1; }
+
+usage(){
+	echo 1>&2 "usage: $0 [-L] [-C] [-A] [-o output_prefix] [-i input_file] [-t temp_filename] [-m method] [-f frames_per_sec] [-b bitrate] [-c Codec] [-s scale (movie height)] [-k] [-j jobs] [-e file_extension] <image list>"
+  echo "	-L                        create a timelapse"
+  echo "	-C                        create a composite"
+  echo "	-A                        create an animation of the composite process; can only be used with -C"
+  echo "	-o	output_prefix      	  prefix for any output files - do not include extension"
+  echo "	-i	input_file          	input filename; list of files to create the composite from; default composefiles"
+  echo "	-t  temp_filename     		filename prefix to use for temporary files, if not the default: timelapse_temp"
+  echo "	-m	method	              composite method: lighten, lighten_intensity, darken, darken_intensity"
+  echo "	-f frames_per_second    	number of frames per second to use for video encoding; default 30"
+  echo "	-b bitrate                target bitrate compression for video encoding; default 5000"
+  echo "	-c Codec                  codec for video encoding; default msmpeg4v2"
+  echo "	-s scale                  height in pixels for video encoding; default 768"
+  echo "	-k                        (k)eep temporary file around; default cleanup"
+  echo "	-b bitrate                target bitrate compression for video encoding; default 5000"
+  echo "	-j jobs                   number of jobs to pass to GNU parallel; the script will try to parallelize as much as possible"
+  echo "	                          sadly, there's no good cross-platform way to detect the number of cores/vcpus available"
+  echo "	-e extension              file extension for both input and output (and temporary files)"
+  echo "	                          used to create a list of input files if no filelist is given"
+  echo "	<image list>              list of files to create timelapse; if empty, extension will be used to create list"
+	exit 1
+}
 
 NARG=$#
-#if [ $NARG -eq 0 ]; then
-#	echo 1>&2 "usage: mklapse [-o output_filename] [-f frames_per_sec] [-b bitrate] [-k] <image list>"
-#	exit 1
-#fi
+[ $NARG -eq 0 ] && usage
 
 while [ $NARG -gt 0 ] 
 do
 	case "$1" in
-		-h)  echo 1>&2 "usage: mklapse [-o output_filename] [-f frames_per_sec] [-b bitrate] [-k] <image list>";
-			 exit 1;;
+		-h)  usage;;
 #  select a filename for output from mencoder.  ".avi" will be added to the end.
 		-o) output="$2"; shift;;
 #  frames per second.  30 is nice and smooth
 		-f) fps=$2; shift;;
 #  bitrate determines encoding compression
 		-b) bitrate=$2; shift;;
+#  movie Codec to pass to mencoder. 
+		-c) codec=$2; shift;;
+#  scale for movie size
+		-s) scale=$2; shift;;
 #  keep intermediate files, otherwise the resized jpegs and the file lists will be deleted (default)
-		-k) keep=1; shift;;
+		-k) keep=1;;
+#  Number of jobs to run in parallel
+    -j) jobs=$2; shift;;
+#  specify the file extension - also determines output for composite - use instead of a file list
+		-e) extension=$2; shift;;
+#  specify a temporary file name. Default is ${output_temp}
+		-t) temp=$2; shift;;
+#  specify an input file name with a list of files 
+		-i) input="$2"; shift;;
+#  specify a temporary file name. Default is ${output_temp}
+		-m) method="$2"; shift;;
+#  make a time-lapse movie?
+    -L) lapse=1;;
+#  make a composite image?
+    -C) composite=1;;
+#  make an animation of the composite?
+    -A) anim=1;;
 #  filelist - still a work in progress.  so far still just using 'find'; might be useful to have a filename
 #  pattern, or just a file with a list of input files
-		*) filelist="$1"; break;;
+		*) filelist="$@"; break;;
 	esac
 	shift
 done
 
+# if we haven't been given an action, abort.
+if [[ $lapse == 0 && $composite == 0 && $anim == 0 ]]; then
+	echo "Nothing to do! Use -L, -C, or -A"
+	exit 1
+fi
+
+# can't use -A without -C 
+if [[ $composite == 0 && $anim == 1 ]]; then
+	echo "The -A switch makes no sense without the -C switch!"
+	exit 1
+fi
+
+# Check validity of extension variable.  Currently, we're just doing tiff and jpeg
+shopt -s extglob
+if [[ ! $extension == @(JPG|JPEG|jpeg|jpg|TIFF|TIF|tif|tiff) ]]; then
+    echo Extension $extension is not valid. Use: JPEG, JPG, jpg, jpeg, TIFF, TIF, tiff, or tif.
+		exit 1
+fi
+
+# if no filelist, use the extension to find files in the current directory
+if [[ -z "$filelist" ]]; then
+	echo "Finding files in the current directory by file extension provided: $extension"
+  filelist=`find . -name "*.${extension}"`
+fi
+
+# Check for a currently existing order file, and remove.
+if [[ -f ./order ]]; then
+	echo "File ./order already exists. My laziness currently prevents me from giving you an option. Removing."
+	rm ./order
+fi
+
 # right now just assuming ".JPG" as the extension of the files - the default on my Canons.  
 #  Would be useful to switch to an option to explicitly state the extension of the filenames.
 #  ...or just make use of the filelist option above...
-for jpg in `find . -name "*.JPG"` 
-do 
-#  0x9003 is the exif code for timestamp that the image was taken, at least on my Canons - need to verify for 
-#  other makes/models.  I use this method rather than by filename/numbering since I don't always remember to 
-# reset the file numbering in the camera before I get started, so if the numbering rolls over from 9999 to 
-#  0001, I still get the order the images were taken.
-	snap=`exif -i $jpg | grep 0x9003 | awk -F'|' '{print $2}'`
-# add each file, preceded by it's timestamp, to the order file...
-	echo "${snap}|${jpg}" >> ./order
-# below line need to be optioned for adding timestamp to the image itself - needs more work.
-#	echo ${jpg} >> stampedfiles
-#        echo ${snap} >> stampedfiles
-done
+for file in $filelist
+  do 
+#  0x9003 is the exif code for timestamp that the image was taken.  I use this method rather 
+#  than by filename/numbering since I don't always remember to reset the file numbering in 
+#  the camera before I get started, so if the numbering rolls over from 9999 to 0001, I still 
+#  get the order the images were taken.
+#  old exif method - exif doesn't work with newer tif files
+#	snap=`exif -i $file | grep 0x9003 | awk -F'|' '{print $2}'`
+	snap=`exiftool -H $file | grep 0x9003 | awk '{print $5, $6}'`
+#	imageid=`exiftool -H $file | grep 0x0425 | awk -F':' '{print $2}' | sed -e 's/^ //'`
+	imageid=`exiftool -H $file | grep 0x0425 | awk -F': ' '{print $2}'`
+# add each file, preceded by its timestamp, to the order file, using delimiter '|'
+	echo "${snap}|${file}|${imageid}" >> ./order
+done	
+imageid=""
+
+# Since the first thing in the file is the timestamp, sort sorts on the exif timestamp of the image, and 
+# you get the list in order shot, rather than the name of the file.  This will preserve the order shot, 
+# no matter if you forgot to reset the filenames in the camera, or heaven forbid, you have > 10,000 files
+# and the name wrap around from IMG_9999 back to IMG_0000.
 sort order | awk -F'|' '{print $2}' > sortedfiles
+
+# At one point, I didn't know mencoder could resize the images as it was creating the timelapse movie, 
+# so these lines created a set of smaller files to build the movie from.  No longer necessary, but the
+# parallel commands are a great reference, so I've left them here.
 #parallel --gnu -N2 -j+1 convert {1} -geometry 1280x720 -gravity southeast -fill orange  -annotate 0x0+10+5 '{2}' {1.}-small.jpg :::: stampedfiles
-parallel --gnu -j+1 convert {} -geometry 1280x720 {.}-small.jpg :::: sortedfiles
-sed 's/.JPG/-small.jpg/g' < sortedfiles > resizedfiles
-mencoder "mf://@resizedfiles" -mf fps=${fps} -o ${output}.avi -ovc lavc -lavcopts vcodec=msmpeg4v2:vbitrate=${bitrate}
-rm order
+#parallel --gnu -j ${jobs} convert {} -geometry 1280x720 {.}-small.jpg :::: sortedfiles
+# sed 's/.JPG/-small.jpg/g' < sortedfiles > resizedfiles
+#mencoder "mf://@resizedfiles" -mf fps=${fps} -o ${output}.avi -ovc lavc -lavcopts vcodec=msmpeg4v2:vbitrate=${bitrate}
+if [[ $lapse ]]; then
+  echo "Creating timelapse ${output}.avi"
+  mencoder "mf://@sortedfiles" -mf fps=${fps} -o ${output}.avi -ovc lavc -vf scale=-2:${scale} -lavcopts vcodec=${codec}:vbitrate=${bitrate}
+
+fi
+
+if [[ $composite ]]; then
+  echo "Creating composite"
+  if [[ ! -f ${input} ]]; then
+	  cp sortedfiles ${input}
+  fi
+
+  if [[ $anim && ! -d ./compositeanim ]]; then
+		mkdir ./compositeanim
+	fi
+	
+# The -compose option to convert requires two images.  Rather than try to code up an exclusive case for
+# the first two images, I seed our temporary image with the first, and composite it with itself.  A waste of 
+# an operation, but I'm too lazy and processing power is ridiculous now.
+  seed=`head -1 ${input}`
+  cp $seed ${temp}.${extension}
+
+# iterate through the files listed in the input file, composite each file onto the intermediate composite, output 
+# to tmp.extension.  Then move the resulting tmp.extension to the intermediate filename and move on to the next file.
+  filelist=`cat ${input}`
+	listnum=`wc -w <<< "$filelist"`
+	curnum=0
+  for image in `cat ${input}` 
+  do 
+	  (( curnum += 1 ))
+    convert -compose ${method} -composite $image ${temp}.${extension} tmp.${extension} 2>/dev/null
+		if [[ $anim ]]; then
+		  imageid=`grep $image ./order | awk -F'|' '{print $3}'`
+			echo imageid = ${imageid}
+			echo temp file is tmp.${extension}
+			echo target file is ./compositeanim/tmp-${imageid}.${extension}
+			cp tmp.${extension} ./compositeanim/tmp-${imageid}.${extension}
+			echo ./compositeanim/tmp-${imageid}.${extension} >> ./compositeanim/compositeanimfiles
+		fi
+	  mv tmp.${extension} ${temp}.${extension} 
+		percent=$(( 100 * $curnum / $listnum ))
+	  echo ${image}, ${percent}% done 
+  done
+
+# finally, move the intermediate temporary file to the desired output filename.
+  mv ${temp}.${extension} ${output}.${extension}
+fi
+
+if [[ $anim ]]; then
+# Section for composite anim - logic needs to be incorporated into composite section with conditionals...
+#for image in `cat ${input}` 
+#do 
+#  newf=`echo $jpg | awk -F'.jpg' '{print $1}'`
+#	convert -compose lighten -composite $jpg composite_temp.jpg ${newf}-tmp.jpg
+#	cp ${newf}-tmp.jpg composite_temp.jpg
+#	echo ${newf}-tmp.jpg >> compositeanimfiles
+#	echo $jpg done
+#done
+
+mencoder "mf://@compositeanim/compositeanimfiles" -mf fps=${fps} -o ./compositeanim/${output}-composite.avi -ovc lavc -vf scale=-2:${scale} -lavcopts vcodec=${codec}:vbitrate=${bitrate}
+
+fi
