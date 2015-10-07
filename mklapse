@@ -23,7 +23,7 @@ bitrate=5000
 fps=30
 keep=0
 # it would be nice to figure out how  many cores are available, but each unix has a different reporting method
-jobs=1
+jobs=4
 scale=768
 codec="msmpeg4v2"
 temp=${output}_temp
@@ -32,6 +32,7 @@ method=lighten
 lapse=0
 composite=0
 anim=0
+
 
 #  check for existence of tools we need
 command -v exiftool >/dev/null 2>&1 || { echo >&2 "I require exiftool but it's not installed.  Aborting."; exit 1; }
@@ -91,17 +92,18 @@ do
 #  specify a temporary file name. Default is ${output_temp}
 		-m) method="$2"; shift;;
 #  make a time-lapse movie?
-    -L) lapse=1;;
+    -L) lapse=1; echo "lapse set";;
 #  make a composite image?
-    -C) composite=1;;
+    -C) composite=1; echo "composite set";;
 #  make an animation of the composite?
-    -A) anim=1;;
+    -A) anim=1; echo "composite anim set";;
 #  filelist - still a work in progress.  so far still just using 'find'; might be useful to have a filename
 #  pattern, or just a file with a list of input files
 		*) filelist="$@"; break;;
 	esac
 	shift
 done
+
 
 # if we haven't been given an action, abort.
 if [[ $lapse == 0 && $composite == 0 && $anim == 0 ]]; then
@@ -166,20 +168,22 @@ sort order | awk -F'|' '{print $2}' > sortedfiles
 #parallel --gnu -j ${jobs} convert {} -geometry 1280x720 {.}-small.jpg :::: sortedfiles
 # sed 's/.JPG/-small.jpg/g' < sortedfiles > resizedfiles
 #mencoder "mf://@resizedfiles" -mf fps=${fps} -o ${output}.avi -ovc lavc -lavcopts vcodec=msmpeg4v2:vbitrate=${bitrate}
-if [[ $lapse ]]; then
-  echo "Creating timelapse ${output}.avi"
-  mencoder "mf://@sortedfiles" -mf fps=${fps} -o ${output}.avi -ovc lavc -vf scale=-2:${scale} -lavcopts vcodec=${codec}:vbitrate=${bitrate}
 
+if [[ $lapse == 1 ]]; then
+  echo "Creating timelapse ${output}.avi"
+  mencoder "mf://@sortedfiles" -mf fps=${fps} -o ${output}.avi -ovc lavc -vf scale=-2:${scale} -lavcopts vcodec=${codec}:vbitrate=${bitrate} -lavdopts threads=${jobs}
 fi
 
-if [[ $composite ]]; then
+if [[ $composite == 1 ]]; then
   echo "Creating composite"
   if [[ ! -f ${input} ]]; then
 	  cp sortedfiles ${input}
   fi
 
-  if [[ $anim && ! -d ./compositeanim ]]; then
+  if [[ $anim == 1 && ! -d ./compositeanim ]]; then
+		echo "making compositeanim directory"
 		mkdir ./compositeanim
+		echo "anim is set to $anim"
 	fi
 	
 # The -compose option to convert requires two images.  Rather than try to code up an exclusive case for
@@ -197,13 +201,15 @@ if [[ $composite ]]; then
   do 
 	  (( curnum += 1 ))
     convert -compose ${method} -composite $image ${temp}.${extension} tmp.${extension} 2>/dev/null
-		if [[ $anim ]]; then
+		if [[ $anim == 1 ]]; then
+			echo "in first compositeanim section"
 		  imageid=`grep $image ./order | awk -F'|' '{print $3}'`
 			echo imageid = ${imageid}
 			echo temp file is tmp.${extension}
 			echo target file is ./compositeanim/tmp-${imageid}.${extension}
 			cp tmp.${extension} ./compositeanim/tmp-${imageid}.${extension}
 			echo ./compositeanim/tmp-${imageid}.${extension} >> ./compositeanim/compositeanimfiles
+			echo "leaving first compositeanim section"
 		fi
 	  mv tmp.${extension} ${temp}.${extension} 
 		percent=$(( 100 * $curnum / $listnum ))
@@ -214,7 +220,8 @@ if [[ $composite ]]; then
   mv ${temp}.${extension} ${output}.${extension}
 fi
 
-if [[ $anim ]]; then
+if [[ $anim == 1 ]]; then
+	echo "in second composite anim section"
 # Section for composite anim - logic needs to be incorporated into composite section with conditionals...
 #for image in `cat ${input}` 
 #do 
@@ -225,6 +232,6 @@ if [[ $anim ]]; then
 #	echo $jpg done
 #done
 
-mencoder "mf://@compositeanim/compositeanimfiles" -mf fps=${fps} -o ./compositeanim/${output}-composite.avi -ovc lavc -vf scale=-2:${scale} -lavcopts vcodec=${codec}:vbitrate=${bitrate}
-
+mencoder "mf://@compositeanim/compositeanimfiles" -mf fps=${fps} -o ./compositeanim/${output}-composite.avi -ovc lavc -vf scale=-2:${scale} -lavcopts vcodec=${codec}:vbitrate=${bitrate} -lavdopts threads=${jobs}
+echo "leaving second composite anim section"
 fi
