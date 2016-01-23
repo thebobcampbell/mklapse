@@ -7,10 +7,12 @@
 # mencoder (MPlayer)  http://en.wikipedia.org/wiki/MEncoder
 # libexif   http://libexif.sourceforge.net/
 
-#  The idea is this: You take an intervalometer series of images with a camera.  The timelapse section
-# of the script will sort the files by shutter actuation time in the exif data (regardless of filename)
-# and create an AVI movie.  Once the order is known, you can create a composite of all or a subset of 
-# the images.  You can also have it create an AVI of the process of creating the AVI.
+#  The idea is this: You take an intervalometer series of images with a 
+#  camera.  The timelapse section of the script will sort the files by 
+#  shutter actuation time in the exif data (regardless of filename)  
+#  and create an AVI movie.  Once the order is known, you can create a 
+#  composite of all or a subset of the images.  You can also have it 
+#  create an AVI of the process of creating the AVI.
 
 
 set -e
@@ -79,11 +81,13 @@ do
 		-c) codec=$2; shift;;
 #  scale for movie size
 		-s) scale=$2; shift;;
-#  keep intermediate files, otherwise the resized jpegs and the file lists will be deleted (default)
+#  keep intermediate files, otherwise the resized jpegs and the file 
+#  lists will be deleted (default)
 		-k) keep=1;;
 #  Number of jobs to run in parallel
     -j) jobs=$2; shift;;
-#  specify the file extension - also determines output for composite - use instead of a file list
+#  specify the file extension - also determines output for composite - 
+# use instead of a file list
 		-e) extension=$2; shift;;
 #  specify a temporary file name. Default is ${output_temp}
 		-t) temp=$2; shift;;
@@ -97,8 +101,9 @@ do
     -C) composite=1; echo "composite set";;
 #  make an animation of the composite?
     -A) anim=1; echo "composite anim set";;
-#  filelist - still a work in progress.  so far still just using 'find'; might be useful to have a filename
-#  pattern, or just a file with a list of input files
+#  filelist - still a work in progress.  so far still just using 'find'; 
+# might be useful to have a filename pattern, or just a file with a 
+# list of input files
 		*) filelist="$@"; break;;
 	esac
 	shift
@@ -136,15 +141,17 @@ if [[ -f ./order ]]; then
 	rm ./order
 fi
 
-# right now just assuming ".JPG" as the extension of the files - the default on my Canons.  
-#  Would be useful to switch to an option to explicitly state the extension of the filenames.
+# right now just assuming ".JPG" as the extension of the files - the 
+# default on my Canons.  Would be useful to switch to an option to 
+# explicitly state the extension of the filenames.
 #  ...or just make use of the filelist option above...
 for file in $filelist
   do 
-#  0x9003 is the exif code for timestamp that the image was taken.  I use this method rather 
-#  than by filename/numbering since I don't always remember to reset the file numbering in 
-#  the camera before I get started, so if the numbering rolls over from 9999 to 0001, I still 
-#  get the order the images were taken.
+#  0x9003 is the exif code for timestamp that the image was taken.  I 
+# use this method rather than by filename/numbering since I don't 
+# always remember to reset the file numbering in the camera before I 
+# get started, so if the numbering rolls over from 9999 to 0001, I still 
+# get the order the images were taken.
 #  old exif method - exif doesn't work with newer tif files
 #	snap=`exif -i $file | grep 0x9003 | awk -F'|' '{print $2}'`
 	snap=`exiftool -H $file | grep 0x9003 | awk '{print $5, $6}'`
@@ -155,15 +162,18 @@ for file in $filelist
 done	
 imageid=""
 
-# Since the first thing in the file is the timestamp, sort sorts on the exif timestamp of the image, and 
-# you get the list in order shot, rather than the name of the file.  This will preserve the order shot, 
-# no matter if you forgot to reset the filenames in the camera, or heaven forbid, you have > 10,000 files
-# and the name wrap around from IMG_9999 back to IMG_0000.
+# Since the first thing in the file is the timestamp, sort sorts on the 
+# exif timestamp of the image, and you get the list in order shot, 
+# rather than the name of the file.  This will preserve the order shot, no 
+# matter if you forgot to reset the filenames in the camera, or 
+# heaven forbid, you have > 10,000 files and the names wrap around 
+# from IMG_9999 back to IMG_0000.
 sort order | awk -F'|' '{print $2}' > sortedfiles
 
-# At one point, I didn't know mencoder could resize the images as it was creating the timelapse movie, 
-# so these lines created a set of smaller files to build the movie from.  No longer necessary, but the
-# parallel commands are a great reference, so I've left them here.
+# At one point, I didn't know mencoder could resize the images as it was 
+# creating the timelapse movie, so these lines created a set of smaller 
+# files to build the movie from.  No longer necessary, but the parallel 
+# commands are a great reference, so I've left them here.
 #parallel --gnu -N2 -j+1 convert {1} -geometry 1280x720 -gravity southeast -fill orange  -annotate 0x0+10+5 '{2}' {1.}-small.jpg :::: stampedfiles
 #parallel --gnu -j ${jobs} convert {} -geometry 1280x720 {.}-small.jpg :::: sortedfiles
 # sed 's/.JPG/-small.jpg/g' < sortedfiles > resizedfiles
@@ -186,14 +196,17 @@ if [[ $composite == 1 ]]; then
 		echo "anim is set to $anim"
 	fi
 	
-# The -compose option to convert requires two images.  Rather than try to code up an exclusive case for
-# the first two images, I seed our temporary image with the first, and composite it with itself.  A waste of 
+# The -compose option to convert requires two images.  Rather than try to 
+# code up an exclusive case for the first two images, I seed our 
+# temporary image with the first, and composite it with itself.  A waste of 
 # an operation, but I'm too lazy and processing power is ridiculous now.
   seed=`head -1 ${input}`
   cp $seed ${temp}.${extension}
 
-# iterate through the files listed in the input file, composite each file onto the intermediate composite, output 
-# to tmp.extension.  Then move the resulting tmp.extension to the intermediate filename and move on to the next file.
+# iterate through the files listed in the input file, composite each file 
+# onto the intermediate composite, output to tmp.extension.  Then move 
+# the resulting tmp.extension to the intermediate filename and move on 
+# to the next file.
   filelist=`cat ${input}`
 	listnum=`wc -w <<< "$filelist"`
 	curnum=0
@@ -222,7 +235,8 @@ fi
 
 if [[ $anim == 1 ]]; then
 	echo "in second composite anim section"
-# Section for composite anim - logic needs to be incorporated into composite section with conditionals...
+# Section for composite anim - logic needs to be incorporated into 
+# composite section with conditionals...
 #for image in `cat ${input}` 
 #do 
 #  newf=`echo $jpg | awk -F'.jpg' '{print $1}'`
