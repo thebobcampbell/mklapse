@@ -187,6 +187,7 @@ fi
 if [[ $composite == 1 ]]; then
   echo "Creating composite"
   if [[ ! -f ${input} ]]; then
+          echo "input file name not set - using sortedfiles"
 	  cp sortedfiles ${input}
   fi
 
@@ -200,6 +201,7 @@ if [[ $composite == 1 ]]; then
 # code up an exclusive case for the first two images, I seed our 
 # temporary image with the first, and composite it with itself.  A waste of 
 # an operation, but I'm too lazy and processing power is ridiculous now.
+  echo "creating seed file"
   seed=`head -1 ${input}`
   cp $seed ${temp}.${extension}
 
