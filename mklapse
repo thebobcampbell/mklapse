@@ -2,9 +2,9 @@
 
 # by Robert Campbell <rsc@indra.com>
 # you need the following software for this script:
-# Imagemagick   http://www.imagemagick.org/‎
+# Imagemagick   http://www.imagemagick.org/
 # mencoder (MPlayer)  http://en.wikipedia.org/wiki/MEncoder
-# libexif   http://libexif.sourceforge.net/
+# exiftool  https://www.sno.phy.queensu.ca/~phil/exiftool/
 
 # At some point in the future you may need:
 # GNU parallel   http://www.gnu.org/software/parallel/
@@ -56,7 +56,7 @@ usage(){
   echo "	-b bitrate                target bitrate compression for video encoding; default 5000"
   echo "	-c Codec                  codec for video encoding; default msmpeg4v2"
   echo "	-s scale                  height in pixels for video encoding; default 768"
-  echo "	-k                        (k)eep temporary file around; default cleanup"
+  echo "	-k                        (k)eep temporary file around; default = cleanup"
   echo "	-b bitrate                target bitrate compression for video encoding; default 5000"
   echo "	-j jobs                   number of jobs to pass to GNU parallel; the script will try to parallelize as much as possible"
   echo "	                          sadly, there's no good cross-platform way to detect the number of cores/vcpus available"
