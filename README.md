@@ -18,9 +18,9 @@ ANIMATION
 The anim function, -A, only makes sense when creating a composite since it is, in fact, a movie of the composite creation process.  It takes the same options as the timelapse function, though making a timelapse is not a requisite. 
 
 
-The following tools are required:
-Imagemagick   http://www.imagemagick.org/
-mencoder (MPlayer)  http://en.wikipedia.org/wiki/MEncoder
-exiftool  https://www.sno.phy.queensu.ca/~phil/exiftool/
+The following tools are required:</br>
+Imagemagick   http://www.imagemagick.org/</br>
+mencoder (MPlayer)  http://en.wikipedia.org/wiki/MEncoder</br>
+exiftool  https://www.sno.phy.queensu.ca/~phil/exiftool/</br>
 
 
