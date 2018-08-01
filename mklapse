@@ -3,9 +3,11 @@
 # by Robert Campbell <rsc@indra.com>
 # you need the following software for this script:
 # Imagemagick   http://www.imagemagick.org/‎
-# GNU parallel   http://www.gnu.org/software/parallel/
 # mencoder (MPlayer)  http://en.wikipedia.org/wiki/MEncoder
 # libexif   http://libexif.sourceforge.net/
+
+# At some point in the future you may need:
+# GNU parallel   http://www.gnu.org/software/parallel/
 
 #  The idea is this: You take an intervalometer series of images with a 
 #  camera.  The timelapse section of the script will sort the files by 
@@ -125,13 +127,13 @@ fi
 # Check validity of extension variable.  Currently, we're just doing tiff and jpeg
 shopt -s extglob
 if [[ ! $extension == @(JPG|JPEG|jpeg|jpg|TIFF|TIF|tif|tiff) ]]; then
-    echo Extension $extension is not valid. Use: JPEG, JPG, jpg, jpeg, TIFF, TIF, tiff, or tif.
-		exit 1
+  echo Extension $extension is not valid. Use: JPEG, JPG, jpg, jpeg, TIFF, TIF, tiff, or tif.
+	exit 1
 fi
 
 # if no filelist, use the extension to find files in the current directory
 if [[ -z "$filelist" ]]; then
-	echo "Finding files in the current directory by file extension provided: $extension"
+  echo "Finding files in the current directory by file extension provided: $extension"
   filelist=`find . -name "*.${extension}"`
 fi
 
@@ -141,22 +143,34 @@ if [[ -f ./order ]]; then
 	rm ./order
 fi
 
-# right now just assuming ".JPG" as the extension of the files - the 
-# default on my Canons.  Would be useful to switch to an option to 
-# explicitly state the extension of the filenames.
-#  ...or just make use of the filelist option above...
+# conditional exif grep argument, depending on JPG or TIFF
+# Ok, so it turns out that different image formats make use of different 
+# exif tags. So while TIFFs have "Original Document ID", JPEGs have 
+# "Image Unique ID" and this may vary between camera models and 
+# manufacturers. So there's no really good solution to getting the info
+# I want from the exif data. Hex codes for the tags also seem to vary
+# among the software writing the file - cameras, ImageMagick, and 
+# Lightroom all seem to differ.
+if [[ $extension == @(JPG|JPEG|jpeg|jpg) ]]; then
+	imageidgrep="0x0028"
+else  # tif
+	imageidgrep="0x0425"
+fi
+
+# You must explicitly state the extension of the filenames. OTBSS
 for file in $filelist
   do 
-#  0x9003 is the exif code for timestamp that the image was taken.  I 
-# use this method rather than by filename/numbering since I don't 
+#  0x9003 is the exif code for the timestamp that the image was taken.  
+# I use this method rather than using filename/numbering since I don't 
 # always remember to reset the file numbering in the camera before I 
 # get started, so if the numbering rolls over from 9999 to 0001, I still 
-# get the order the images were taken.
-#  old exif method - exif doesn't work with newer tif files
-#	snap=`exif -i $file | grep 0x9003 | awk -F'|' '{print $2}'`
+# get the order the images were taken. While this doesn't matter for composites,
+# it does matter for timelapse video and composite anim.
+# Anyway, I'm going to have to work this so that going into the for loop,
+# we already know if we're dealing with TIFF or JPEG (thanks to the -e switch)
+# so I'll set a particular grep for the ID which will change between formats.
 	snap=`exiftool -H $file | grep 0x9003 | awk '{print $5, $6}'`
-#	imageid=`exiftool -H $file | grep 0x0425 | awk -F':' '{print $2}' | sed -e 's/^ //'`
-	imageid=`exiftool -H $file | grep 0x0425 | awk -F': ' '{print $2}'`
+	imageid=`exiftool -H $file | grep "${imageidgrep}" | awk -F': ' '{print $2}'`
 # add each file, preceded by its timestamp, to the order file, using delimiter '|'
 	echo "${snap}|${file}|${imageid}" >> ./order
 done	
@@ -237,17 +251,6 @@ fi
 
 if [[ $anim == 1 ]]; then
 	echo "in second composite anim section"
-# Section for composite anim - logic needs to be incorporated into 
-# composite section with conditionals...
-#for image in `cat ${input}` 
-#do 
-#  newf=`echo $jpg | awk -F'.jpg' '{print $1}'`
-#	convert -compose lighten -composite $jpg composite_temp.jpg ${newf}-tmp.jpg
-#	cp ${newf}-tmp.jpg composite_temp.jpg
-#	echo ${newf}-tmp.jpg >> compositeanimfiles
-#	echo $jpg done
-#done
-
-mencoder "mf://@compositeanim/compositeanimfiles" -mf fps=${fps} -o ./compositeanim/${output}-composite.avi -ovc lavc -vf scale=-2:${scale} -lavcopts vcodec=${codec}:vbitrate=${bitrate} -lavdopts threads=${jobs}
-echo "leaving second composite anim section"
+  mencoder "mf://@compositeanim/compositeanimfiles" -mf fps=${fps} -o ./compositeanim/${output}-composite.avi -ovc lavc -vf scale=-2:${scale} -lavcopts vcodec=${codec}:vbitrate=${bitrate} -lavdopts threads=${jobs}
+  echo "leaving second composite anim section"
 fi
